@@ -11,7 +11,6 @@ class UEP::Loader
     if newpath = env['REQUEST_URI'][/^\/status(\/.*$)/,1]
       @env.merge! 'PATH_INFO' => newpath, 'REQUEST_PATH' => newpath,'REQUEST_URI' => newpath      
     end
-    
     @request = Rack::Request.new @env
     if @request.path =~ /^\/uep\//
       # Read payload
@@ -21,21 +20,38 @@ class UEP::Loader
       puts "   processing: #{'%6.3f' % (finish - start)}"
       puts "    rendering: #{'%6.3f' % (t - finish)}"
       puts "        total: #{'%6.3f' % (t - start)}"
-      @response = Rack::Response.new([0], 200, {})
+      Rack::Response.new([0], 200, {}).finish
     else
       # Add payload
       status, headers, body = @app.call(@env)
       parts = []
-      body = body.each { |s| parts << s.gsub!(/<\/body>/i, payload) } 
-      @response = Rack::Response.new(parts, status, headers || {})
+      found = false
+      len = 0
+      body.each do |s|
+        if !found && s.is_a?(String) && body_match = s.match(/<\/body>/i) 
+          found = true
+          parts << body_match.pre_match
+          parts << payload
+          parts << body_match.to_s
+          parts << body_match.post_match
+        else
+          parts << s
+        end
+        len += parts.last.size
+      end
+      puts "len: #{headers['CONTENT_LENGTH']}"
+      if found
+        #dump_request
+        headers['CONTENT_LENGTH'] &&= len
+        Rack::Response.new(parts, status, headers).finish
+      else
+        return [status, headers, body]
+      end
     end
-    v = @response.finish
-    dump_request
-    v
   end
   
   def payload
-    %Q[<img width=1 height=1 src="/uep#{@request.path}/#{@start_time}:#{Time.now.to_f}.png">]
+    @payload ||= %Q[<img width=1 height=1 src="/uep#{@request.path}/#{@start_time}:#{Time.now.to_f}.png">]
   end
   def undump
     info = @request.path[/\/uep\/(.*)\.png/, 1]
